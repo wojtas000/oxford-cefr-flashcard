@@ -1,4 +1,5 @@
 import React, { createContext, useState, useContext, useEffect, ReactNode, useMemo } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Flashcard, StudyMode, CefrLevel } from '../types';
 import rawData from '../assets/data/flashcards.json';
 
@@ -22,14 +23,71 @@ interface DeckContextType {
 const DeckContext = createContext<DeckContextType | undefined>(undefined);
 
 export const DeckProvider = ({ children }: { children: ReactNode }) => {
+  const [isLoaded, setIsLoaded] = useState(false);
   const [mode, setMode] = useState<StudyMode>('en_to_en');
   const [cefrLevel, setCefrLevel] = useState<CefrLevel>('both');
   const [allCards, setAllCards] = useState<Flashcard[]>([]);
   const [doneCardIds, setDoneCardIds] = useState<Set<string>>(new Set());
   const [currentIndex, setCurrentIndex] = useState(0);
 
-  // Initialize and filter cards based on CEFR level
+  // Load saved state on mount
   useEffect(() => {
+    const loadState = async () => {
+      try {
+        const savedMode = await AsyncStorage.getItem('deck_mode');
+        const savedLevel = await AsyncStorage.getItem('deck_cefrLevel');
+        const savedDoneIds = await AsyncStorage.getItem('deck_doneCardIds');
+        const savedIndex = await AsyncStorage.getItem('deck_currentIndex');
+        const savedAllCards = await AsyncStorage.getItem('deck_allCards');
+
+        let initialLevel: CefrLevel = 'both';
+        if (savedMode) setMode(savedMode as StudyMode);
+        if (savedLevel) {
+          initialLevel = savedLevel as CefrLevel;
+          setCefrLevel(initialLevel);
+        }
+        if (savedDoneIds) setDoneCardIds(new Set(JSON.parse(savedDoneIds)));
+        
+        // initialize cards
+        let parsedCards: Flashcard[] = [];
+        if (savedAllCards) {
+           parsedCards = JSON.parse(savedAllCards);
+        } else {
+           parsedCards = Object.entries(rawData).map(([id, data]: [string, any]) => ({
+             id,
+             word: data.word,
+             type: data.type,
+             cefr: data.cefr as 'b2' | 'c1',
+             definition: data.definition,
+             example: data.example,
+             phon_br: data.phon_br,
+             phon_n_am: data.phon_n_am,
+             word_pl: data.word_pl || '',
+           }));
+           if (initialLevel !== 'both') {
+             parsedCards = parsedCards.filter(c => c.cefr === initialLevel);
+           }
+        }
+        setAllCards(parsedCards);
+
+        if (savedIndex) {
+          setCurrentIndex(parseInt(savedIndex, 10));
+        } else {
+          setCurrentIndex(0);
+        }
+      } catch (e) {
+        console.error('Failed to load saved state:', e);
+      } finally {
+        setIsLoaded(true);
+      }
+    };
+    loadState();
+  }, []);
+
+  // Update cards based on CEFR level change ONLY when user triggers it (isLoaded is true)
+  useEffect(() => {
+    if (!isLoaded) return; // Ignore initial render, loadState handles it
+
     let parsedCards: Flashcard[] = Object.entries(rawData).map(([id, data]: [string, any]) => ({
       id,
       word: data.word,
@@ -48,7 +106,24 @@ export const DeckProvider = ({ children }: { children: ReactNode }) => {
 
     setAllCards(parsedCards);
     setCurrentIndex(0);
-  }, [cefrLevel]);
+  }, [cefrLevel, isLoaded]);
+
+  // Save state when it changes
+  useEffect(() => {
+    if (!isLoaded) return;
+    const saveState = async () => {
+      try {
+        await AsyncStorage.setItem('deck_mode', mode);
+        await AsyncStorage.setItem('deck_cefrLevel', cefrLevel);
+        await AsyncStorage.setItem('deck_doneCardIds', JSON.stringify(Array.from(doneCardIds)));
+        await AsyncStorage.setItem('deck_currentIndex', currentIndex.toString());
+        await AsyncStorage.setItem('deck_allCards', JSON.stringify(allCards));
+      } catch (e) {
+        console.error('Failed to save state:', e);
+      }
+    };
+    saveState();
+  }, [mode, cefrLevel, doneCardIds, currentIndex, allCards, isLoaded]);
 
   // Compute the active cards
   const activeCards = useMemo(() => {
@@ -57,10 +132,10 @@ export const DeckProvider = ({ children }: { children: ReactNode }) => {
 
   // Make sure currentIndex stays within bounds when activeCards changes
   useEffect(() => {
-    if (activeCards.length > 0 && currentIndex >= activeCards.length) {
+    if (isLoaded && activeCards.length > 0 && currentIndex >= activeCards.length) {
       setCurrentIndex(Math.max(0, activeCards.length - 1));
     }
-  }, [activeCards.length, currentIndex]);
+  }, [activeCards.length, currentIndex, isLoaded]);
 
   const nextCard = () => {
     setCurrentIndex((prev) => Math.min(prev + 1, Math.max(0, activeCards.length - 1)));
@@ -85,15 +160,17 @@ export const DeckProvider = ({ children }: { children: ReactNode }) => {
       newSet.add(id);
       return newSet;
     });
-    // The activeCards array will automatically shrink.
-    // If currentIndex is not at the end, it will automatically point to the next card
-    // because the current element is removed. If it is at the end, the useEffect above will clamp it.
   };
 
   const resetProgress = () => {
     setDoneCardIds(new Set());
     setCurrentIndex(0);
   };
+
+  // Do not render children until data is loaded to prevent flashing of default states
+  if (!isLoaded) {
+    return null; // Or a loading spinner
+  }
 
   return (
     <DeckContext.Provider
