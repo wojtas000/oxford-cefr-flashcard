@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "flashcard-app",
-    "slug": "flashcard-app",
+    "slug": "oxford-cefr-flashcards",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -21,13 +21,20 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.jaywoo002sorganization.oxfordcefrflashcards"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-font"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "25a287a7-d583-4eff-accb-c6d698cd3dd6"
+      }
+    },
+    "owner": "jaywoo002s-organization"
   }
 }
